@@ -1,0 +1,23 @@
+{
+  "mcpServers": {
+    "simplenote": {
+      "command": "npx",
+      "args": ["-y", "@automattic/simplenote-mcp@2.0.1"],
+      "env": {"SIMPLENOTE_MCP_DISABLE_TELEMETRY": "1"},
+      "adapter": {"type": "simplenote_tasks", "note_id": "${SIMPLENOTE_TASK_NOTE_ID}"},
+      "lambda": false
+    },
+    "time": {
+      "disabled": true,
+      "command": "uvx",
+      "args": ["mcp-server-time==2026.8.18", "--local-timezone=${BRIDGE_TIMEZONE}"],
+      "tools": ["convert_time"],
+      "instructions": "Use time__convert_time only to convert a time between two time zones.",
+      "lambda": {
+        "packages": ["mcp-server-time==2026.8.18"],
+        "command": "python",
+        "args": ["-m", "mcp_server_time", "--local-timezone=${BRIDGE_TIMEZONE}"]
+      }
+    }
+  }
+}

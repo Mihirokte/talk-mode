@@ -1,0 +1,70 @@
+{
+  "interactionModel": {
+    "languageModel": {
+      "invocationName": "talk mode",
+      "intents": [
+        { "name": "AMAZON.CancelIntent", "samples": [] },
+        { "name": "AMAZON.HelpIntent", "samples": [] },
+        { "name": "AMAZON.StopIntent", "samples": [] },
+        { "name": "AMAZON.NavigateHomeIntent", "samples": [] },
+        { "name": "AMAZON.FallbackIntent", "samples": [] },
+        {
+          "name": "AskIntent",
+          "slots": [
+            {
+              "name": "query",
+              "type": "AMAZON.SearchQuery",
+              "samples": ["{query}"]
+            }
+          ],
+          "samples": [
+            "about {query}",
+            "question {query}",
+            "my question is {query}",
+            "i want to know {query}",
+            "i have a question {query}"
+          ]
+        },
+        {
+          "name": "GoOnIntent",
+          "slots": [],
+          "samples": [
+            "go on",
+            "continue",
+            "go ahead",
+            "carry on",
+            "what did you find",
+            "tell me the answer"
+          ]
+        }
+      ],
+      "types": []
+    },
+    "dialog": {
+      "intents": [
+        {
+          "name": "AskIntent",
+          "delegationStrategy": "SKILL_RESPONSE",
+          "confirmationRequired": false,
+          "prompts": {},
+          "slots": [
+            {
+              "name": "query",
+              "type": "AMAZON.SearchQuery",
+              "confirmationRequired": false,
+              "elicitationRequired": true,
+              "prompts": { "elicitation": "Elicit.Slot.AskIntent.query" }
+            }
+          ]
+        }
+      ],
+      "delegationStrategy": "SKILL_RESPONSE"
+    },
+    "prompts": [
+      {
+        "id": "Elicit.Slot.AskIntent.query",
+        "variations": [{ "type": "PlainText", "value": "What's your question?" }]
+      }
+    ]
+  }
+}

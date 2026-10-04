@@ -1,0 +1,25 @@
+# --- Secrets and personal config: never commit (scripts/secret_scan.py also blocks them) ---
+.env
+.env.*
+!.env.example
+mcp_servers.json
+auth.json
+*.pem
+*.key
+*.p12
+
+# --- Runtime data: spend ledger, conversation history, request logs, tunnel URLs ---
+data/
+*.sqlite3
+*.jsonl
+*.log
+
+# --- Build and tool output ---
+build/
+.venv/
+__pycache__/
+*.pyc
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.DS_Store

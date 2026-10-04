@@ -1,0 +1,193 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Talk Mode: Alexa custom-skill backend. Lambda (invoked directly by Alexa,
+  restricted to one skill ID) + DynamoDB conversation memory. No API Gateway,
+  no always-on compute. The OpenRouter key lives in SSM Parameter Store and is
+  created by deploy.py (CloudFormation cannot create SecureString parameters).
+
+Parameters:
+  FunctionName:
+    Type: String
+    Default: talk-mode
+  SkillId:
+    Type: String
+    AllowedPattern: "amzn1\\.ask\\.skill\\.[0-9a-fA-F-]+"
+    Description: Skill ID from the Alexa Developer Console. Only this skill may invoke the function.
+  ApiKeyParameterName:
+    Type: String
+    Default: /talk-mode/openrouter-api-key
+  Model:
+    Type: String
+    Default: deepseek/deepseek-v4.1-flash
+  ProviderOrder:
+    Type: String
+    Default: deepinfra
+  Reasoning:
+    Type: String
+    Default: low
+  WebSearch:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+  DeadlineSeconds:
+    Type: String
+    Default: "7.0"
+  Timezone:
+    Type: String
+    Default: UTC
+    Description: IANA time zone for "today" and the date the model is told, e.g. Europe/London.
+  UserLocation:
+    Type: String
+    Default: ""
+    Description: Optional. Country or city the model is told the user is in.
+  SpendCapUsd:
+    Type: String
+    Default: "0"
+    Description: >-
+      Lifetime OpenRouter spend (USD) after which the function stops calling the
+      model. Tracked in the DynamoDB table, separately from the local Mac total. 0 = no cap.
+  AlertEmail:
+    Type: String
+    Default: ""
+    Description: Optional. Email for an AWS budget alert (AWS charges only, not OpenRouter).
+  MonthlyBudgetUsd:
+    Type: Number
+    Default: 1
+
+Conditions:
+  HasAlertEmail: !Not [!Equals [!Ref AlertEmail, ""]]
+
+Resources:
+  Table:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: expires_at
+        Enabled: true
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${FunctionName}
+      RetentionInDays: 14
+
+  Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: talk-mode-runtime
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub ${LogGroup.Arn}:*
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                Resource: !GetAtt Table.Arn
+              - Effect: Allow
+                Action: ssm:GetParameter
+                Resource: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ApiKeyParameterName}
+              # Self-invocation for answers that miss Alexa's deadline ("say go on").
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${FunctionName}
+
+  Function:
+    Type: AWS::Lambda::Function
+    DependsOn: LogGroup
+    Properties:
+      FunctionName: !Ref FunctionName
+      Description: Alexa skill backend that answers through OpenRouter
+      Runtime: python3.13
+      Architectures: [arm64]
+      Handler: bridge.lambda_handler.handler
+      MemorySize: 512
+      Timeout: 40
+      Role: !GetAtt Role.Arn
+      # Placeholder only. deploy.py uploads the real bundle with
+      # UpdateFunctionCode right after the stack deploys. Keep this property
+      # unchanged so stack updates never overwrite the uploaded code.
+      Code:
+        ZipFile: |
+          def handler(event, context):
+              raise RuntimeError("bundle not uploaded yet; run deploy/deploy.py deploy")
+      Environment:
+        Variables:
+          BRIDGE_STORE: dynamodb
+          BRIDGE_DYNAMODB_TABLE: !Ref Table
+          OPENROUTER_API_KEY_PARAM: !Ref ApiKeyParameterName
+          BRIDGE_SKILL_ID: !Ref SkillId
+          BRIDGE_MODEL: !Ref Model
+          BRIDGE_PROVIDER_ORDER: !Ref ProviderOrder
+          BRIDGE_REASONING: !Ref Reasoning
+          BRIDGE_WEB_SEARCH: !Ref WebSearch
+          BRIDGE_DEADLINE_SECONDS: !Ref DeadlineSeconds
+          BRIDGE_SPEND_CAP_USD: !Ref SpendCapUsd
+          BRIDGE_TIMEZONE: !Ref Timezone
+          BRIDGE_USER_LOCATION: !Ref UserLocation
+  # Deferred-answer jobs are invoked asynchronously; never retry them, since a
+  # retry re-asks the model and the user has moved on by then.
+  AsyncConfig:
+    Type: AWS::Lambda::EventInvokeConfig
+    Properties:
+      FunctionName: !Ref Function
+      Qualifier: $LATEST
+      MaximumRetryAttempts: 0
+      MaximumEventAgeInSeconds: 60
+
+  AlexaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt Function.Arn
+      Principal: alexa-appkit.amazon.com
+      EventSourceToken: !Ref SkillId
+
+  Budget:
+    Type: AWS::Budgets::Budget
+    Condition: HasAlertEmail
+    Properties:
+      Budget:
+        BudgetName: !Sub ${FunctionName}-monthly
+        BudgetType: COST
+        TimeUnit: MONTHLY
+        BudgetLimit:
+          Amount: !Ref MonthlyBudgetUsd
+          Unit: USD
+      NotificationsWithSubscribers:
+        - Notification:
+            NotificationType: ACTUAL
+            ComparisonOperator: GREATER_THAN
+            Threshold: 50
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: EMAIL
+              Address: !Ref AlertEmail
+
+Outputs:
+  FunctionArn:
+    Description: Paste into Alexa Developer Console > Build > Endpoint > AWS Lambda ARN (Default Region)
+    Value: !GetAtt Function.Arn
+  TableName:
+    Value: !Ref Table

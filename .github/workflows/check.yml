@@ -1,0 +1,23 @@
+name: check
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Secret scan (every tracked file)
+        run: python3 scripts/secret_scan.py --tracked
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - name: Lint
+        run: uv run --extra dev ruff check .
+      - name: Types
+        run: uv run --all-extras mypy
+      - name: Tests
+        run: uv run --extra dev --extra mcp pytest -q

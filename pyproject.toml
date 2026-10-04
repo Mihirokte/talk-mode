@@ -1,0 +1,57 @@
+[project]
+name = "talk-mode"
+version = "0.2.0"
+description = "Alexa custom skill that sends what you say to an OpenRouter model, with MCP tools, and speaks the answer."
+requires-python = ">=3.13"
+# Runtime deps shared by the local server and the Lambda bundle. Pinned exactly.
+dependencies = [
+    "httpx==0.28.1",
+]
+
+[project.optional-dependencies]
+# Local web server: FastAPI app plus Alexa request-signature verification.
+# The Lambda path needs none of this (Alexa invokes the function directly).
+server = [
+    "fastapi==0.142.2",
+    "uvicorn==0.54.0",
+    "cryptography==50.0.2",
+    "certifi==2026.7.22",
+]
+# MCP client support; only needed when mcp_servers.json lists servers.
+mcp = [
+    "mcp==2.2.0",
+]
+# AWS deploy tooling, run from your machine.
+deploy = [
+    "boto3==1.43.107",
+]
+# Lint, types and tests (make check).
+dev = [
+    "ruff==0.16.10",
+    "mypy==2.4.0",
+    "pytest==9.1.1",
+]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 130
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+# Scripts put the repo root on sys.path before importing bridge.
+"scripts/*" = ["E402"]
+
+[tool.mypy]
+python_version = "3.13"
+files = ["bridge", "scripts", "deploy", "tests"]
+ignore_missing_imports = true
+check_untyped_defs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

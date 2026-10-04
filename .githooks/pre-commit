@@ -1,0 +1,4 @@
+#!/bin/sh
+# Blocks a commit that contains a secret or personal value. Enabled by `make setup`
+# (git config core.hooksPath .githooks). See scripts/secret_scan.py.
+exec python3 "$(git rev-parse --show-toplevel)/scripts/secret_scan.py" --staged
