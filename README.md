@@ -1,5 +1,8 @@
 # Talk Mode
 
+[![check](https://github.com/Mihirokte/talk-mode/actions/workflows/check.yml/badge.svg)](https://github.com/Mihirokte/talk-mode/actions/workflows/check.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 An Alexa custom skill that turns an Echo into a voice front end for any [OpenRouter](https://openrouter.ai) model. Say "Alexa, open talk mode" (or "start talk mode") and keep talking: every question goes to the model with the day's conversation, and the answer is spoken back. The model can search the web and use [MCP](https://modelcontextprotocol.io) tools, such as a Simplenote task list you can read and add to by voice.
 
 It runs on your own machine behind a Cloudflare quick tunnel, or on AWS Lambda for about $0 a month in AWS charges. At about 15 questions a day the model bill is typically under $1 a month (see [docs/DESIGN.md](docs/DESIGN.md)).
@@ -31,7 +34,7 @@ sequenceDiagram
 Prerequisites: [uv](https://docs.astral.sh/uv/), Python 3.13 (uv installs it), `cloudflared` for the tunnel, an OpenRouter key with credit, and an Amazon developer account. Node.js 22+ only if you use the Simplenote server.
 
 ```bash
-git clone <this repo> talk-mode && cd talk-mode
+git clone https://github.com/Mihirokte/talk-mode.git && cd talk-mode
 make setup          # deps, secret-scanning git hooks, .env and mcp_servers.json from the examples
 $EDITOR .env        # OPENROUTER_API_KEY, BRIDGE_TIMEZONE; BRIDGE_SKILL_ID once the skill exists
 make replay-serve   # terminal 1: local backend, unsigned requests, localhost only
@@ -71,11 +74,11 @@ The note is a title line, then optional `*Section*` headings with `- ` bullets. 
 
 ## Keeping secrets out of git
 
-- **What stays local:** `.env`, `mcp_servers.json`, `data/` (spend ledger, conversation history, logs, tunnel URL) and `build/` are git-ignored.
+- **What stays local:** `.env`, `.secrets.local`, `mcp_servers.json`, `data/` (spend ledger, conversation history, logs, tunnel URL) and `build/` are git-ignored.
 - **Pre-commit and pre-push hooks:** `make setup` enables `.githooks/`. They run `scripts/secret_scan.py`, which refuses a commit or push if:
   - a forbidden file is staged;
-  - anything looks like a key (OpenRouter, OpenAI, Anthropic, AWS, GitHub, Slack, Google, private keys), a real Alexa skill or account id, or a tunnel hostname;
-  - any value from your own `.env` or `mcp_servers.json` appears anywhere, even in a doc.
+  - anything looks like a key (OpenRouter, OpenAI, Anthropic, AWS, GitHub, Slack, Google, private keys), a real Alexa skill, account, device or person id, or a tunnel hostname;
+  - any of your own values appears anywhere, even in a doc. That covers everything in `.env` and `mcp_servers.json`, the Simplenote MCP login kept in your user config directory, your git email, and anything you list in `.secrets.local` (one value per line).
 - **CI:** the same scan runs on every push to GitHub.
 - **On AWS:** the OpenRouter key goes to SSM Parameter Store as a SecureString, never into the template or the code bundle.
 
@@ -104,3 +107,11 @@ scripts/           replay, tunnel launcher, cost and model tools, secret scanner
 tests/             adapter, MCP config and secret-scanner tests
 docs/              setup guide and design notes
 ```
+
+## Contributing, security and license
+
+- **Contributing:** see [CONTRIBUTING.md](CONTRIBUTING.md). `make check` has to pass, and it's the same check CI runs.
+- **Security:** report vulnerabilities privately, as described in [SECURITY.md](SECURITY.md).
+- **License:** [MIT](LICENSE).
+
+Talk Mode isn't affiliated with Amazon, OpenRouter or Automattic. Alexa and Echo are trademarks of Amazon.com, Inc. or its affiliates.

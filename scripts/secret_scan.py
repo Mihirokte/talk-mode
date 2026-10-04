@@ -8,10 +8,16 @@ Runs from the git hooks in .githooks/ (enabled by `make setup`) and in CI.
 Three layers, so one miss is caught by the next:
 1. Paths that must never be tracked (.env, mcp_servers.json, data/, keys, databases).
 2. Token patterns: OpenRouter/OpenAI/Anthropic/AWS/GitHub/Slack keys, private
-   keys, real Alexa skill and account ids, Cloudflare tunnel hostnames.
-3. Your own values: every value in your local .env (and every ${VAR}-free
-   string in mcp_servers.json env/adapter blocks) is searched for literally,
-   so a key pasted into a doc or a test is caught even if no pattern matches.
+   keys, real Alexa skill, account, device and person ids, Cloudflare tunnel
+   hostnames.
+3. Your own values, searched for literally so a value pasted into a doc or a
+   test is caught even if no pattern matches:
+   - every value in your local .env, and every ${VAR}-free string in
+     mcp_servers.json env/adapter blocks;
+   - logins that MCP servers keep outside this repo (simplenote-mcp's
+     auth.json and telemetry.json in your user config directory);
+   - your git user.email;
+   - anything else you list in .secrets.local (git-ignored, one value per line).
 
 Only the location of a finding is printed, never the matched value.
 Standard library only, so the hook runs before any virtualenv exists.
@@ -20,10 +26,11 @@ Standard library only, so the hook runs before any virtualenv exists.
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from fnmatch import fnmatch
 from pathlib import Path
@@ -33,6 +40,7 @@ ROOT = Path(__file__).resolve().parent.parent
 FORBIDDEN_PATHS = (
     ".env",
     ".env.*",
+    ".secrets.local",
     "mcp_servers.json",
     "auth.json",
     "*.pem",
@@ -62,13 +70,18 @@ PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
         re.compile(r"amzn1\.ask\.skill\.(?!([0-9a-f])\1{7}-)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"),
     ),
     ("Alexa account/user id", re.compile(r"amzn1\.(?:ask\.account|account)\.[A-Z0-9]{20,}")),
+    ("Alexa device/person id", re.compile(r"amzn1\.ask\.(?:device|person)\.[A-Za-z0-9_-]{20,}")),
     ("Cloudflare tunnel URL", re.compile(r"\b[a-z]+(?:-[a-z]+){2,}\.trycloudflare\.com")),
     ("bearer token", re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/-]{24,}=*")),
 )
 MIN_LITERAL = 8  # shorter .env values (true, 7.0, sqlite) are settings, not secrets
+LITERAL_KIND = "a private value from this machine"
 # Values already written in these tracked examples are public by definition.
 PUBLIC_EXAMPLES = (".env.example", "mcp_servers.example.json")
 SKIP_SUFFIXES = (".lock",)  # dependency hashes would only produce noise
+# Files an MCP server keeps its login in, outside this repo. Paths mirror
+# simplenote-mcp's providers/paths.js (getConfigDir).
+SIMPLENOTE_STORE_FILES = ("auth.json", "telemetry.json")
 
 
 @dataclass(frozen=True)
@@ -83,6 +96,49 @@ class Finding:
 
 def _git(*args: str) -> str:
     return subprocess.run(["git", *args], cwd=ROOT, check=True, capture_output=True, text=True).stdout
+
+
+def simplenote_config_dir(platform: str, home: Path, env: Mapping[str, str]) -> Path:
+    """Where simplenote-mcp keeps auth.json on this platform (sys.platform naming)."""
+    if platform == "darwin":
+        return home / "Library" / "Application Support" / "simplenote-mcp"
+    if platform == "win32":
+        return Path(env.get("APPDATA") or home / "AppData" / "Roaming") / "simplenote-mcp"
+    xdg = (env.get("XDG_CONFIG_HOME") or "").strip()
+    return Path(xdg or home / ".config") / "simplenote-mcp"
+
+
+def json_strings(value: object) -> Iterator[str]:
+    """Every string anywhere in a parsed JSON document."""
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for item in value.values():
+            yield from json_strings(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from json_strings(item)
+
+
+def _outside_repo_values() -> list[str]:
+    """Private values kept outside the repo: MCP logins, git email, .secrets.local."""
+    values: list[str] = []
+    store = simplenote_config_dir(sys.platform, Path.home(), os.environ)
+    for name in SIMPLENOTE_STORE_FILES:
+        path = store / name
+        if path.is_file():
+            try:
+                values.extend(json_strings(json.loads(path.read_text())))
+            except (OSError, json.JSONDecodeError):
+                print(f"secret_scan: could not read {path}; its values are not checked", file=sys.stderr)
+    try:
+        values.append(_git("config", "user.email").strip())
+    except subprocess.CalledProcessError:  # no email configured (CI)
+        pass
+    extra = ROOT / ".secrets.local"
+    if extra.exists():
+        values.extend(s for line in extra.read_text().splitlines() if (s := line.strip()) and not s.startswith("#"))
+    return values
 
 
 def local_values() -> list[str]:
@@ -110,6 +166,7 @@ def local_values() -> list[str]:
                         continue
                     if isinstance(value, str) and "${" not in value and len(value) >= MIN_LITERAL:
                         values.append(value)
+    values.extend(v for v in _outside_repo_values() if len(v) >= MIN_LITERAL)
     # Settings such as model names are long but harmless; anything that is
     # already in a tracked example file is public by definition.
     public = "".join((ROOT / name).read_text() for name in PUBLIC_EXAMPLES if (ROOT / name).exists())
@@ -138,7 +195,7 @@ def scan_text(
                 found.append(Finding(path, number, kind))
         for value in literal_list:
             if value in line:
-                found.append(Finding(path, number, "a value from your local .env / mcp_servers.json"))
+                found.append(Finding(path, number, LITERAL_KIND))
     return found
 
 
@@ -171,7 +228,7 @@ def main(argv: list[str]) -> int:
         print("secret_scan: refusing, possible secret or personal data:", file=sys.stderr)
         for finding in findings:
             print(finding, file=sys.stderr)
-        print("Remove it (keep real values in .env, which is git-ignored) and try again.", file=sys.stderr)
+        print("Remove it (keep real values in .env or .secrets.local, both git-ignored) and try again.", file=sys.stderr)
         return 1
     print(f"secret_scan: {len(files)} file(s) clean ({len(literals)} local value(s) checked)")
     return 0

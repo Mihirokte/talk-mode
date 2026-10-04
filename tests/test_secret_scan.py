@@ -29,15 +29,34 @@ def test_real_alexa_ids_are_caught_but_placeholders_pass() -> None:
     real = "amzn1.ask.skill." + "1a2b3c4d-1111-2222-3333-444455556666"
     assert "Alexa skill id" in kinds(real)
     assert kinds("amzn1.ask.skill.00000000-0000-0000-0000-000000000000") == set()
+    assert "Alexa account/user id" in kinds("amzn1.ask.account." + "AMA" + "X1" * 20)
+    assert "Alexa device/person id" in kinds("amzn1.ask.device." + "AMA" + "x1" * 20)
+    assert "Alexa device/person id" in kinds("amzn1.ask.person." + "AMA" + "X1" * 20)
+    # scripts/replay.py's fake ids are short and must stay allowed.
+    assert kinds("amzn1.ask.account.replay-user") == set()
 
 
 def test_local_values_are_matched_literally() -> None:
     private = "my-own-" + "value-1234"
-    assert kinds(f"note: {private}", (private,)) == {"a value from your local .env / mcp_servers.json"}
+    assert kinds(f"note: {private}", (private,)) == {scan.LITERAL_KIND}
+
+
+def test_simplenote_login_location_matches_simplenote_mcp() -> None:
+    home = Path("/home/someone")
+    assert scan.simplenote_config_dir("darwin", home, {}) == home / "Library" / "Application Support" / "simplenote-mcp"
+    assert scan.simplenote_config_dir("linux", home, {}) == home / ".config" / "simplenote-mcp"
+    assert scan.simplenote_config_dir("linux", home, {"XDG_CONFIG_HOME": "/xdg"}) == Path("/xdg/simplenote-mcp")
+    assert scan.simplenote_config_dir("win32", home, {"APPDATA": "C:/AppData"}) == Path("C:/AppData/simplenote-mcp")
+
+
+def test_every_string_in_a_login_file_is_collected() -> None:
+    email, token, nested = "someone" + "@example.org", "t" * 32, "id-" + "9" * 12
+    login = {"username": email, "token": token, "meta": {"ids": [nested]}, "n": 3}
+    assert sorted(scan.json_strings(login)) == sorted([email, token, nested])
 
 
 def test_forbidden_paths() -> None:
-    for path in (".env", ".env.local", "mcp_servers.json", "data/bridge.sqlite3", "x/auth.json", "id.pem"):
+    for path in (".env", ".env.local", ".secrets.local", "mcp_servers.json", "data/bridge.sqlite3", "x/auth.json", "id.pem"):
         assert scan.path_finding(path) is not None, path
     for path in (".env.example", "mcp_servers.example.json", "bridge/llm.py"):
         assert scan.path_finding(path) is None, path

@@ -2,11 +2,19 @@
 name = "talk-mode"
 version = "0.2.0"
 description = "Alexa custom skill that sends what you say to an OpenRouter model, with MCP tools, and speaks the answer."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Mihir Okte" }]
 requires-python = ">=3.13"
 # Runtime deps shared by the local server and the Lambda bundle. Pinned exactly.
 dependencies = [
     "httpx==0.28.1",
 ]
+
+[project.urls]
+Repository = "https://github.com/Mihirokte/talk-mode"
+Issues = "https://github.com/Mihirokte/talk-mode/issues"
 
 [project.optional-dependencies]
 # Local web server: FastAPI app plus Alexa request-signature verification.
